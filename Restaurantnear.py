@@ -10,7 +10,7 @@ import time
 #api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 
 #for prod
-pi_key = st.secrets("GOOGLE_PLACES_API_KEY")
+api_key = st.secrets("GOOGLE_PLACES_API_KEY")
 
 # Enhanced Cuisine Types
 CUISINE_TYPES = [
