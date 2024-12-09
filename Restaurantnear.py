@@ -1,13 +1,14 @@
 import streamlit as st
 import requests
-import os
-from dotenv import load_dotenv
+#import os
+#from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+#load_dotenv()
+#api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 # For production, uncomment the line below and comment out the load_dotenv() and os.getenv line
-# api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
-api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
+
 
 # Predefined cuisine types
 CUISINE_TYPES = [
