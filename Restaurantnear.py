@@ -7,6 +7,8 @@ import time
 
 # Load environment variables
 #load_dotenv()
+
+#for prod
 api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
 
 # Cuisine Types and Keywords (kept from previous version)
