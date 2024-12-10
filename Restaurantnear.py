@@ -132,7 +132,7 @@ def get_compelling_reviews(reviews):
 
 def main():
     st.title("🍽️ Top Dining Places Finder")
-    st.write("Discover the best spots near you!")
+    st.write("Discover the best dining spots near you!")
 
     # Location Input
     input_text = st.text_input("Enter a city or location:")
