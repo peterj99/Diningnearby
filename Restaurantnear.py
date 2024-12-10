@@ -131,7 +131,7 @@ def get_compelling_reviews(reviews):
 
 
 def main():
-    st.title("🍽️ Top Places Finder")
+    st.title("🍽️ Top Dining Places Finder")
     st.write("Discover the best spots near you!")
 
     # Location Input
@@ -171,7 +171,7 @@ def main():
         selected_location = st.selectbox("Select a specific location:", suggestions)
 
         # Find Places Button
-        if st.button("Find Top Places"):
+        if st.button("Find Top Dining Places"):
             # Prepare filters
             type_filter = None if type_filter == "All" else type_filter
             price_filter = None if price_filter == "All" else {
