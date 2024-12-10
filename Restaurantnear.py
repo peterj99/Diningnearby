@@ -2,198 +2,167 @@ import streamlit as st
 import requests
 import os
 from dotenv import load_dotenv
-import functools
-import time
 
 # Load environment variables
 #load_dotenv()
-
-#for prod
+# For production, uncomment the line below and comment out the load_dotenv() and os.getenv line
 api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
+#api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 
-# Cuisine Types and Keywords (kept from previous version)
+# Predefined cuisine types
 CUISINE_TYPES = [
-    "American", "Italian", "Chinese", "Mexican", "Indian", "Japanese", "Thai",
-    "Mediterranean", "French", "Korean", "Spanish", "Vietnamese", "Greek",
-    "Middle Eastern", "Brazilian", "Caribbean", "African", "German"
+    "American",
+    "Italian",
+    "Chinese",
+    "Mexican",
+    "Indian",
+    "Japanese",
+    "Thai",
+    "Mediterranean",
+    "French",
+    "Korean"
 ]
 
+# Specific cuisine type mapping
 CUISINE_KEYWORDS = {
-    "American": ["american", "burger", "grill"],
-    "Italian": ["italian", "pizza", "pasta", "trattoria"],
-    "Chinese": ["chinese", "dim sum", "cantonese", "sichuan"],
-    "Mexican": ["mexican", "taco", "burrito", "tex-mex"],
-    "Indian": ["indian", "curry", "tandoori", "north indian", "south indian"],
-    "Japanese": ["japanese", "sushi", "ramen", "izakaya"],
-    "Thai": ["thai", "pad thai", "thai cuisine"],
-    "Mediterranean": ["mediterranean", "greek", "lebanese", "israeli"],
-    "French": ["french", "bistro", "patisserie", "brasserie"],
-    "Korean": ["korean", "bbq", "korean cuisine"],
-    "Spanish": ["spanish", "tapas"],
-    "Vietnamese": ["vietnamese", "pho"],
-    "Greek": ["greek", "gyro", "souvlaki"],
-    "Middle Eastern": ["middle eastern", "falafel", "kebab"],
-    "Brazilian": ["brazilian", "churrascaria"],
-    "Caribbean": ["caribbean", "jamaican"],
-    "African": ["african", "ethiopian"],
-    "German": ["german", "schnitzel"]
+    "American": ["american"],
+    "Italian": ["italian", "pizza", "pasta"],
+    "Chinese": ["chinese", "dim sum"],
+    "Mexican": ["mexican", "taco", "burrito"],
+    "Indian": ["indian", "curry"],
+    "Japanese": ["japanese", "sushi", "ramen"],
+    "Thai": ["thai"],
+    "Mediterranean": ["mediterranean", "greek", "lebanese"],
+    "French": ["french", "bistro"],
+    "Korean": ["korean", "bbq"]
 }
 
 
-# Caching and error handling decorators (same as previous version)
-def cache_api_call(timeout=3600):
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            cache_key = f"{func.__name__}_{hash(str(args) + str(kwargs))}"
-
-            if hasattr(wrapper, 'cached_result'):
-                cached_time, result = wrapper.cached_result
-                if time.time() - cached_time < timeout:
-                    return result
-
-            result = func(*args, **kwargs)
-
-            wrapper.cached_result = (time.time(), result)
-
-            return result
-
-        return wrapper
-
-    return decorator
-
-
-def handle_api_errors(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except requests.exceptions.RequestException as e:
-            st.error(f"Network Error: {e}")
-            return None
-        except ValueError as e:
-            st.error(f"Data Processing Error: {e}")
-            return None
-        except Exception as e:
-            st.error(f"Unexpected Error: {e}")
-            return None
-
-    return wrapper
-
-
-# API related functions (similar to previous version)
-@handle_api_errors
-@cache_api_call()
-def get_place_suggestions(input_text):
-    url = f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={input_text}&types=(cities)&key={api_key}"
-    response = requests.get(url)
-    response.raise_for_status()
-    suggestions = response.json().get('predictions', [])
-
-    if not suggestions:
-        st.warning(f"No locations found for '{input_text}'. Try a different location.")
-
-    return [prediction['description'] for prediction in suggestions]
-
-
-@handle_api_errors
-@cache_api_call()
-def get_nearby_restaurants(location, cuisine_filter=None, price_filter=None):
-    # Geocoding
-    geocoding_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={location}&key={api_key}"
-    geocoding_response = requests.get(geocoding_url)
-    location_data = geocoding_response.json()
-
-    if location_data['status'] != 'OK':
-        st.error("Could not find location coordinates.")
-        return []
-
-    location = location_data['results'][0]['geometry']['location']
-    lat, lng = location['lat'], location['lng']
-
-    # Nearby search
-    nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius=1500&type=restaurant&rankby=prominence&key={api_key}"
-    nearby_response = requests.get(nearby_url)
-    restaurants = nearby_response.json().get('results', [])
-
-    # Apply filters
-    filtered_restaurants = restaurants
-
-    # Cuisine Filter
-    if cuisine_filter:
-        filtered_restaurants = [
-            rest for rest in filtered_restaurants
-            if any(keyword in str(rest.get('types', '')).lower()
-                   for keyword in CUISINE_KEYWORDS.get(cuisine_filter, []))
-        ]
-
-    # Price Filter
-    if price_filter:
-        filtered_restaurants = [
-            rest for rest in filtered_restaurants
-            if rest.get('price_level') == price_filter
-        ]
-
-    # Limit to top 10
-    return filtered_restaurants[:10]
-
-
-@handle_api_errors
-@cache_api_call()
-def get_place_details(place_id):
-    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=name,formatted_address,url,website,editorial_summary,rating,user_ratings_total,reviews,types,price_level,photos&key={api_key}"
-    response = requests.get(url)
-    return response.json().get('result', {})
-
-
-@handle_api_errors
-def get_place_photos(details, max_width=800, max_photos=5):
-    """Retrieve multiple restaurant photos"""
-    photos = details.get('photos', [])
-    photo_urls = []
-
-    for photo in photos[:max_photos]:
-        url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photoreference={photo['photo_reference']}&key={api_key}"
-        photo_urls.append(url)
-
-    return photo_urls
-
-
+# Function to filter cuisine types
 def filter_cuisine_types(types):
-    """Enhanced cuisine type filtering"""
+    """
+    Filter out irrelevant types and match with predefined cuisines
+    """
     for cuisine, keywords in CUISINE_KEYWORDS.items():
         if any(keyword in type.lower() for type in types for keyword in keywords):
             return cuisine
     return None
 
 
-def get_best_review(reviews):
-    """Get the top review, preferably 5-star"""
-    if not reviews:
+# Function to get place suggestions
+def get_place_suggestions(input_text):
+    """
+    Get place suggestions based on user input using Google Places Autocomplete API
+    """
+    url = f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={input_text}&types=(cities)&key={api_key}"
+    try:
+        response = requests.get(url)
+        suggestions = response.json().get('predictions', [])
+        return [prediction['description'] for prediction in suggestions]
+    except Exception as e:
+        st.error(f"Error fetching place suggestions: {e}")
+        return []
+
+
+# Function to get nearby restaurants
+def get_nearby_restaurants(location, cuisine_filter=None, price_filter=None):
+    """
+    Find nearby restaurants using Google Places Nearby Search API with optional filters
+    """
+    # First, get the geocoding for the location
+    geocoding_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={location}&key={api_key}"
+    try:
+        geocoding_response = requests.get(geocoding_url)
+        location_data = geocoding_response.json()
+
+        if location_data['status'] != 'OK':
+            st.error("Could not find location coordinates. Please check the location and try again.")
+            return []
+
+        # Extract latitude and longitude
+        location = location_data['results'][0]['geometry']['location']
+        lat, lng = location['lat'], location['lng']
+
+        # Nearby search
+        nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius=1500&type=restaurant&rankby=prominence&key={api_key}"
+        nearby_response = requests.get(nearby_url)
+        restaurants = nearby_response.json().get('results', [])
+
+        # Apply filters
+        filtered_restaurants = restaurants
+
+        # Cuisine Filter
+        if cuisine_filter:
+            filtered_restaurants = [
+                rest for rest in filtered_restaurants
+                if filter_cuisine_types(rest.get('types', [])) == cuisine_filter
+            ]
+
+        # Price Filter
+        if price_filter:
+            filtered_restaurants = [
+                rest for rest in filtered_restaurants
+                if rest.get('price_level') == price_filter
+            ]
+
+        # No restaurants found
+        if not filtered_restaurants:
+            st.warning("No restaurants found matching your criteria. Please try different filters.")
+
+        return filtered_restaurants[:10]
+    except Exception as e:
+        st.error(f"Error finding restaurants: {e}")
+        return []
+
+
+# Function to get detailed restaurant information
+def get_place_details(place_id):
+    """
+    Get comprehensive details for a specific restaurant
+    """
+    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=name,formatted_address,url,website,editorial_summary,rating,user_ratings_total,reviews,types,price_level,photos&key={api_key}"
+    try:
+        response = requests.get(url)
+        return response.json().get('result', {})
+    except Exception as e:
+        st.error(f"Error fetching place details: {e}")
+        return {}
+
+
+# Function to get restaurant photo
+def get_place_photo(photo_reference, max_width=400):
+    """
+    Retrieve a restaurant photo
+    """
+    if not photo_reference:
         return None
 
-    # Sort reviews by rating in descending order
-    sorted_reviews = sorted(reviews, key=lambda x: x.get('rating', 0), reverse=True)
-    return sorted_reviews[0]
+    url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth={max_width}&photoreference={photo_reference}&key={api_key}"
+    return url
 
 
-def create_photo_carousel(photo_urls):
+# Function to get compelling reviews
+def get_compelling_reviews(reviews):
     """
-    Create a photo carousel using Streamlit's columns and image display
+    Filter and select compelling reviews
     """
-    if not photo_urls:
-        return None
+    # First, try to get 5-star reviews
+    five_star_reviews = [review for review in reviews if review.get('rating') == 5]
 
-    # Create columns for carousel effect
-    cols = st.columns(len(photo_urls))
+    # If no 5-star reviews, fall back to 4-star reviews
+    if not five_star_reviews:
+        five_star_reviews = [review for review in reviews if review.get('rating') == 4]
 
-    for i, (col, photo_url) in enumerate(zip(cols, photo_urls)):
-        with col:
-            st.image(photo_url, use_column_width=True, caption=f"Photo {i + 1}")
+    # If still no reviews, return the first available review
+    if not five_star_reviews and reviews:
+        five_star_reviews = [reviews[0]]
+
+    return five_star_reviews
 
 
+# Streamlit App
 def main():
-    st.title("🍽️ Top 10 Restaurant Finder")
+    st.title("🍽️ Top Restaurants Finder")
     st.write("Discover the best dining spots near you!")
 
     # Location Input
@@ -221,7 +190,7 @@ def main():
             ]
         )
 
-    # Location Suggestions
+    # Get Place Suggestions
     if input_text:
         suggestions = get_place_suggestions(input_text)
 
@@ -243,7 +212,7 @@ def main():
                 "$$$$ (Very Expensive)": 4
             }[price_filter]
 
-            # Find Nearby Restaurants (now limited to top 10)
+            # Find Nearby Restaurants
             restaurants = get_nearby_restaurants(
                 selected_location,
                 cuisine_filter,
@@ -259,10 +228,11 @@ def main():
                     # Create a card-like display for each restaurant
                     st.markdown(f"### {i}. {details.get('name', 'Unknown Restaurant')}")
 
-                    # Photo Carousel
-                    photo_urls = get_place_photos(details)
-                    if photo_urls:
-                        create_photo_carousel(photo_urls)
+                    # Display Photo if available
+                    if details.get('photos'):
+                        photo_url = get_place_photo(details['photos'][0]['photo_reference'])
+                        if photo_url:
+                            st.image(photo_url, caption=details['name'], use_column_width=True)
 
                     # Restaurant Details
                     col1, col2 = st.columns(2)
@@ -285,19 +255,20 @@ def main():
                     filtered_cuisine = filter_cuisine_types(details.get('types', []))
                     st.write(f"**Cuisine Type:** {filtered_cuisine or 'N/A'}")
 
-                    # Single Top Review
+                    # Compelling Reviews
                     if details.get('reviews'):
-                        top_review = get_best_review(details['reviews'])
-                        if top_review:
-                            st.markdown("**Top Review:**")
-                            reviewer_name = top_review.get('author_name', 'Anonymous')
-                            st.markdown(
-                                f"> \"{top_review.get('text', 'No review text available')}\" - *{reviewer_name}*")
+                        # Get compelling reviews
+                        compelling_reviews = get_compelling_reviews(details['reviews'])
+
+                        if compelling_reviews:
+                            st.markdown("**Compelling Reviews:**")
+                            for review in compelling_reviews:
+                                # Extract name or use 'Anonymous'
+                                reviewer_name = review.get('author_name', 'Anonymous')
+
+                                st.markdown(f"> \"{review.get('text', 'No review text available')}\" - *{reviewer_name}*")
 
                     st.markdown("---")  # Separator between restaurants
-
-            else:
-                st.warning("No restaurants found matching your criteria.")
 
 
 # Run the app
