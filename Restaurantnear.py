@@ -5,56 +5,25 @@ from dotenv import load_dotenv
 
 # Load environment variables
 #load_dotenv()
-# For production, uncomment the line below and comment out the load_dotenv() and os.getenv line
-api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
 #api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 
-# Predefined cuisine types
-CUISINE_TYPES = [
-    "American",
-    "Italian",
-    "Chinese",
-    "Mexican",
-    "Indian",
-    "Japanese",
-    "Thai",
-    "Mediterranean",
-    "French",
-    "Korean"
+api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
+
+# Updated list of place types
+PLACE_TYPES = [
+    'restaurant',
+    'bar',
+    'pub',
+    'cafe',
+    'lodging'
 ]
 
-# Specific cuisine type mapping
-CUISINE_KEYWORDS = {
-    "American": ["american"],
-    "Italian": ["italian", "pizza", "pasta"],
-    "Chinese": ["chinese", "dim sum"],
-    "Mexican": ["mexican", "taco", "burrito"],
-    "Indian": ["indian", "curry"],
-    "Japanese": ["japanese", "sushi", "ramen"],
-    "Thai": ["thai"],
-    "Mediterranean": ["mediterranean", "greek", "lebanese"],
-    "French": ["french", "bistro"],
-    "Korean": ["korean", "bbq"]
-}
 
-
-# Function to filter cuisine types
-def filter_cuisine_types(types):
-    """
-    Filter out irrelevant types and match with predefined cuisines
-    """
-    for cuisine, keywords in CUISINE_KEYWORDS.items():
-        if any(keyword in type.lower() for type in types for keyword in keywords):
-            return cuisine
-    return None
-
-
-# Function to get place suggestions
 def get_place_suggestions(input_text):
     """
     Get place suggestions based on user input using Google Places Autocomplete API
     """
-    url = f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={input_text}&types=(cities)&key={api_key}"
+    url = f"https://maps.googleapis.com/maps/api/place/autocomplete/json?input={input_text}&types=geocode&key={api_key}"
     try:
         response = requests.get(url)
         suggestions = response.json().get('predictions', [])
@@ -64,10 +33,9 @@ def get_place_suggestions(input_text):
         return []
 
 
-# Function to get nearby restaurants
-def get_nearby_restaurants(location, cuisine_filter=None, price_filter=None):
+def get_nearby_places(location, type_filter=None, price_filter=None):
     """
-    Find nearby restaurants using Google Places Nearby Search API with optional filters
+    Find nearby places using Google Places Nearby Search API with optional filters
     """
     # First, get the geocoding for the location
     geocoding_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={location}&key={api_key}"
@@ -83,42 +51,33 @@ def get_nearby_restaurants(location, cuisine_filter=None, price_filter=None):
         location = location_data['results'][0]['geometry']['location']
         lat, lng = location['lat'], location['lng']
 
-        # Nearby search
-        nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius=1500&type=restaurant&rankby=prominence&key={api_key}"
+        # Prepare type filter if specified
+        type_filter = type_filter if type_filter else "restaurant"
+
+        # Updated nearby search with place type and price level
+        nearby_url = f"https://maps.googleapis.com/maps/api/place/nearbysearch/json?location={lat},{lng}&radius=1500&type={type_filter}&key={api_key}"
+
+        # Add price level if specified
+        # Price levels match the Google Places API standard: 0=Free, 1=Inexpensive, 2=Moderate, 3=Expensive, 4=Very Expensive
+        if price_filter is not None:
+            nearby_url += f"&minprice={price_filter}&maxprice={price_filter}"
+
         nearby_response = requests.get(nearby_url)
-        restaurants = nearby_response.json().get('results', [])
+        places = nearby_response.json().get('results', [])
 
-        # Apply filters
-        filtered_restaurants = restaurants
+        # No places found
+        if not places:
+            st.warning("No places found matching your criteria. Please try different filters.")
 
-        # Cuisine Filter
-        if cuisine_filter:
-            filtered_restaurants = [
-                rest for rest in filtered_restaurants
-                if filter_cuisine_types(rest.get('types', [])) == cuisine_filter
-            ]
-
-        # Price Filter
-        if price_filter:
-            filtered_restaurants = [
-                rest for rest in filtered_restaurants
-                if rest.get('price_level') == price_filter
-            ]
-
-        # No restaurants found
-        if not filtered_restaurants:
-            st.warning("No restaurants found matching your criteria. Please try different filters.")
-
-        return filtered_restaurants[:10]
+        return places[:10]
     except Exception as e:
-        st.error(f"Error finding restaurants: {e}")
+        st.error(f"Error finding places: {e}")
         return []
 
 
-# Function to get detailed restaurant information
 def get_place_details(place_id):
     """
-    Get comprehensive details for a specific restaurant
+    Get comprehensive details for a specific place with multiple photo references
     """
     url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=name,formatted_address,url,website,editorial_summary,rating,user_ratings_total,reviews,types,price_level,photos&key={api_key}"
     try:
@@ -129,10 +88,9 @@ def get_place_details(place_id):
         return {}
 
 
-# Function to get restaurant photo
 def get_place_photo(photo_reference, max_width=400):
     """
-    Retrieve a restaurant photo
+    Retrieve a place photo
     """
     if not photo_reference:
         return None
@@ -141,29 +99,40 @@ def get_place_photo(photo_reference, max_width=400):
     return url
 
 
-# Function to get compelling reviews
+def get_price_level_description(price_level):
+    """
+    Convert numeric price level to descriptive string
+    """
+    price_levels = {
+        0: '$ (Free)',
+        1: '$ (Inexpensive)',
+        2: '$$ (Moderate)',
+        3: '$$$ (Expensive)',
+        4: '$$$$ (Very Expensive)'
+    }
+    return price_levels.get(price_level, 'N/A')
+
+
 def get_compelling_reviews(reviews):
     """
-    Filter and select compelling reviews
+    Select one compelling review with at least 4 characters
     """
-    # First, try to get 5-star reviews
-    five_star_reviews = [review for review in reviews if review.get('rating') == 5]
+    # Filter reviews with at least 4 characters
+    valid_reviews = [
+        review for review in reviews
+        if len(review.get('text', '').strip()) >= 4
+    ]
 
-    # If no 5-star reviews, fall back to 4-star reviews
-    if not five_star_reviews:
-        five_star_reviews = [review for review in reviews if review.get('rating') == 4]
+    # Sort reviews by rating in descending order
+    valid_reviews.sort(key=lambda x: x.get('rating', 0), reverse=True)
 
-    # If still no reviews, return the first available review
-    if not five_star_reviews and reviews:
-        five_star_reviews = [reviews[0]]
-
-    return five_star_reviews
+    # Return the top review if available
+    return [valid_reviews[0]] if valid_reviews else []
 
 
-# Streamlit App
 def main():
-    st.title("🍽️ Top Restaurants Finder")
-    st.write("Discover the best dining spots near you!")
+    st.title("🍽️ Top Places Finder")
+    st.write("Discover the best spots near you!")
 
     # Location Input
     input_text = st.text_input("Enter a city or location:")
@@ -172,10 +141,10 @@ def main():
     with st.sidebar:
         st.header("Filters")
 
-        # Cuisine Type Filter
-        cuisine_filter = st.selectbox(
-            "Filter by Cuisine Type",
-            ["All"] + CUISINE_TYPES
+        # Place Type Filter
+        type_filter = st.selectbox(
+            "Filter by Type of Place",
+            ["All"] + sorted(PLACE_TYPES)
         )
 
         # Price Range Filter
@@ -201,10 +170,10 @@ def main():
         # Location Selection
         selected_location = st.selectbox("Select a specific location:", suggestions)
 
-        # Find Restaurants Button
-        if st.button("Find Top Restaurants"):
+        # Find Places Button
+        if st.button("Find Top Places"):
             # Prepare filters
-            cuisine_filter = None if cuisine_filter == "All" else cuisine_filter
+            type_filter = None if type_filter == "All" else type_filter
             price_filter = None if price_filter == "All" else {
                 "$ (Inexpensive)": 1,
                 "$$ (Moderate)": 2,
@@ -212,29 +181,36 @@ def main():
                 "$$$$ (Very Expensive)": 4
             }[price_filter]
 
-            # Find Nearby Restaurants
-            restaurants = get_nearby_restaurants(
+            # Find Nearby Places
+            places = get_nearby_places(
                 selected_location,
-                cuisine_filter,
+                type_filter,
                 price_filter
             )
 
-            # Display Restaurants
-            if restaurants:
-                for i, restaurant in enumerate(restaurants, 1):
+            # Display Places
+            if places:
+                for i, place in enumerate(places, 1):
                     # Get detailed information
-                    details = get_place_details(restaurant['place_id'])
+                    details = get_place_details(place['place_id'])
 
-                    # Create a card-like display for each restaurant
-                    st.markdown(f"### {i}. {details.get('name', 'Unknown Restaurant')}")
+                    # Create a card-like display for each place
+                    st.markdown(f"### {i}. {details.get('name', 'Unknown Place')}")
 
-                    # Display Photo if available
+                    # Display Photos in Carousel/Grid
                     if details.get('photos'):
-                        photo_url = get_place_photo(details['photos'][0]['photo_reference'])
-                        if photo_url:
-                            st.image(photo_url, caption=details['name'], use_column_width=True)
+                        # Select up to 5 photos
+                        photos = details['photos'][:5]
 
-                    # Restaurant Details
+                        # Create a grid of photo columns
+                        cols = st.columns(len(photos))
+
+                        for j, photo in enumerate(photos):
+                            photo_url = get_place_photo(photo['photo_reference'])
+                            if photo_url:
+                                cols[j].image(photo_url, use_container_width=True)
+
+                    # Place Details
                     col1, col2 = st.columns(2)
 
                     with col1:
@@ -243,6 +219,11 @@ def main():
                             f"**Rating:** {details.get('rating', 'N/A')} ⭐ ({details.get('user_ratings_total', 'N/A')} reviews)")
 
                     with col2:
+                        # Price Level
+                        price_level = details.get('price_level')
+                        if price_level is not None:
+                            st.write(f"**Price Range:** {get_price_level_description(price_level)}")
+
                         # Google Maps Link
                         if 'url' in details:
                             st.markdown(f"[View on Google Maps]({details['url']})")
@@ -251,24 +232,23 @@ def main():
                         if 'website' in details:
                             st.markdown(f"[Official Website]({details['website']})")
 
-                    # Cuisine Types
-                    filtered_cuisine = filter_cuisine_types(details.get('types', []))
-                    st.write(f"**Cuisine Type:** {filtered_cuisine or 'N/A'}")
+                    # Place Types - display all types
+                    st.write(f"**Place Types:** {', '.join(details.get('types', ['N/A']))}")
 
                     # Compelling Reviews
                     if details.get('reviews'):
-                        # Get compelling reviews
+                        # Get one compelling review
                         compelling_reviews = get_compelling_reviews(details['reviews'])
 
                         if compelling_reviews:
-                            st.markdown("**Compelling Reviews:**")
-                            for review in compelling_reviews:
-                                # Extract name or use 'Anonymous'
-                                reviewer_name = review.get('author_name', 'Anonymous')
+                            st.markdown("**Compelling Review:**")
+                            review = compelling_reviews[0]
+                            # Extract name or use 'Anonymous'
+                            reviewer_name = review.get('author_name', 'Anonymous')
 
-                                st.markdown(f"> \"{review.get('text', 'No review text available')}\" - *{reviewer_name}*")
+                            st.markdown(f"> \"{review.get('text', 'No review text available')}\" - *{reviewer_name}*")
 
-                    st.markdown("---")  # Separator between restaurants
+                    st.markdown("---")  # Separator between places
 
 
 # Run the app
