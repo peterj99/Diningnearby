@@ -226,14 +226,14 @@ def main():
 
                         # Google Maps Link
                         if 'url' in details:
-                            st.markdown(f"[View on Google Maps]({details['url']})")
+                            st.markdown(f"[Get Directions]({details['url']})")
 
                         # Website Link
-                        if 'website' in details:
-                            st.markdown(f"[Official Website]({details['website']})")
+                        # if 'website' in details:
+                        #     st.markdown(f"[Official Website]({details['website']})")
 
                     # Place Types - display all types
-                    st.write(f"**Place Types:** {', '.join(details.get('types', ['N/A']))}")
+                    #st.write(f"**Place Types:** {', '.join(details.get('types', ['N/A']))}")
 
                     # Compelling Reviews
                     if details.get('reviews'):
