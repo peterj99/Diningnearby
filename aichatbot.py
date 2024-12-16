@@ -11,7 +11,7 @@ import re
 
 # Configuration
 GOOGLE_PLACES_API_KEY = st.secrets["GOOGLE_PLACES_API_KEY"]
-GEMINI_API_KEY = st.secrest["GEMINI_API_KEY"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 
 class RestaurantRecommender:
