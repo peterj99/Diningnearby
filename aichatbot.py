@@ -4,14 +4,14 @@ import requests
 import os
 import json
 import re
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+# from dotenv import load_dotenv
+#
+# # Load environment variables
+# load_dotenv()
 
 # Configuration
-GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_PLACES_API_KEY = st.secrets["GOOGLE_PLACES_API_KEY"]
+GEMINI_API_KEY = st.secrest["GEMINI_API_KEY"]
 
 
 class RestaurantRecommender:
