@@ -1,13 +1,13 @@
 import streamlit as st
 import requests
 import os
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 
 # Load environment variables
-#load_dotenv()
-#api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+load_dotenv()
+api_key = os.getenv("GOOGLE_PLACES_API_KEY")
 
-api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
+#api_key = st.secrets["GOOGLE_PLACES_API_KEY"]
 
 # Updated list of place types
 PLACE_TYPES = [
