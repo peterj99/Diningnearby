@@ -1,44 +1,38 @@
+# AI restaurant model
 import streamlit as st
 import requests
 import google.generativeai as genai
 import os
 from dotenv import load_dotenv
-import time
 import json
 import re
-import random
-import re
+import urllib.parse
 from typing import List, Dict, Any, Optional
 
-# Load environment variables and configure API
-#load_dotenv()
+load_dotenv()
 
-# Configure Streamlit page
 st.set_page_config(
     page_title="AI Restaurant Finder",
     page_icon="🍽️",
     layout="centered"
 )
 
-# Get API keys from environment variables
 # GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 GOOGLE_PLACES_API_KEY = st.secrets["GOOGLE_PLACES_API_KEY"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
-
 def initialize_session_state():
-    """Initialize or reset session state variables for the application flow."""
     default_state = {
         'step': 1,
-        'total_steps': 6,  # Updated to include AI recommendation steps
+        'total_steps': 6,
         'location': None,
         'location_data': None,
         'establishment_type': None,
         'distance': None,
         'restaurants_data': None,
-        'max_results': 60,  # Maximum restaurants to fetch
+        'max_results': 20,
         'current_question': 0,
         'questions': None,
         'answers': {},
@@ -51,68 +45,29 @@ def initialize_session_state():
 
 
 class RestaurantFinder:
-    """Handles all Google Places API interactions for restaurant discovery."""
-
     def __init__(self):
-        """Initialize the RestaurantFinder with API key validation."""
         self.places_api_key = GOOGLE_PLACES_API_KEY
-        if not self.places_api_key:
-            st.error("Google Places API key not found in environment variables.")
-            raise ValueError("Missing API key")
 
     def get_place_suggestions(self, input_text: str) -> List[str]:
-        """Get location suggestions using Google Places Autocomplete."""
-        try:
-            url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
-            params = {
-                "input": input_text,
-                "types": "geocode",
-                "key": self.places_api_key
-            }
-
-            response = requests.get(url, params=params)
-
-            if response.status_code != 200:
-                st.error(f"API Error: Status Code {response.status_code}")
-                return []
-
-            data = response.json()
-
-            if data['status'] != 'OK':
-                st.error(f"API Error: {data['status']}")
-                if 'error_message' in data:
-                    st.error(f"Error Message: {data['error_message']}")
-                return []
-
-            return [prediction['description'] for prediction in data.get('predictions', [])]
-
-        except requests.RequestException as e:
-            st.error(f"Location suggestion error: {str(e)}")
-            return []
+        url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        params = {
+            "input": input_text,
+            "types": "geocode",
+            "key": self.places_api_key
+        }
+        response = requests.get(url, params=params)
+        data = response.json()
+        return [prediction['description'] for prediction in data.get('predictions', [])]
 
     def get_location_coordinates(self, location: str) -> Optional[Dict[str, Any]]:
-        """Convert location string to coordinates using Geocoding API."""
-        try:
-            url = "https://maps.googleapis.com/maps/api/geocode/json"
-            params = {
-                "address": location,
-                "key": self.places_api_key
-            }
-
-            response = requests.get(url, params=params)
-
-            if response.status_code != 200:
-                st.error(f"Geocoding API Error: Status Code {response.status_code}")
-                return None
-
-            data = response.json()
-
-            if data['status'] != 'OK':
-                st.error(f"Geocoding Error: {data['status']}")
-                if 'error_message' in data:
-                    st.error(f"Error Message: {data['error_message']}")
-                return None
-
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {
+            "address": location,
+            "key": self.places_api_key
+        }
+        response = requests.get(url, params=params)
+        data = response.json()
+        if data['status'] == 'OK':
             location_data = data['results'][0]
             coords = location_data['geometry']['location']
             return {
@@ -120,109 +75,53 @@ class RestaurantFinder:
                 'lng': coords['lng'],
                 'formatted_address': location_data['formatted_address']
             }
-
-        except requests.RequestException as e:
-            st.error(f"Geocoding API Error: {str(e)}")
-            return None
+        return None
 
     def get_nearby_restaurants(self, location_data: Dict[str, Any],
                                establishment_type: str, radius: int) -> List[Dict[str, Any]]:
-        """Find nearby restaurants using Google Places API with pagination."""
-        try:
-            all_results = []
-            url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-            params = {
-                "location": f"{location_data['lat']},{location_data['lng']}",
-                "radius": radius,
-                "type": establishment_type.lower(),
-                "key": self.places_api_key,
-                "opennow": True
-            }
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        params = {
+            "location": f"{location_data['lat']},{location_data['lng']}",
+            "radius": radius,
+            "type": establishment_type.lower(),
+            "key": self.places_api_key,
+            "opennow": True
+        }
 
-            # Fetch first page
-            with st.spinner("Fetching restaurants (page 1)..."):
-                response = requests.get(url, params=params)
-                data = response.json()
-                page_count = 1
+        response = requests.get(url, params=params)
+        data = response.json()
+        results = []
 
-                while True:
-                    if data['status'] != 'OK' and data['status'] != 'ZERO_RESULTS':
-                        st.error(f"Places API Error: {data['status']}")
-                        if 'error_message' in data:
-                            st.error(f"Error Message: {data['error_message']}")
-                        break
+        if data['status'] == 'OK':
+            for place in data.get('results', [])[:20]:
+                details = self.get_place_details(place['place_id'])
+                if details:
+                    results.append(details)
 
-                    # Process current page results
-                    current_page_results = []
-                    for place in data.get('results', []):
-                        details = self.get_place_details(place['place_id'])
-                        if details:
-                            current_page_results.append(details)
-
-                    all_results.extend(current_page_results)
-                    st.success(f"Found {len(current_page_results)} places on page {page_count}")
-
-                    # Check if we should continue pagination
-                    if len(all_results) >= st.session_state.max_results or 'next_page_token' not in data:
-                        break
-
-                    # Wait before next request (required by Google)
-                    time.sleep(2)
-                    page_count += 1
-
-                    # Fetch next page
-                    with st.spinner(f"Fetching restaurants (page {page_count})..."):
-                        params['pagetoken'] = data['next_page_token']
-                        response = requests.get(url, params=params)
-                        data = response.json()
-
-            if not all_results:
-                st.warning("No establishments found in this area. Try increasing the distance.")
-
-            return all_results
-
-        except requests.RequestException as e:
-            st.error(f"Restaurant Search Error: {str(e)}")
-            return []
+        return results
 
     def get_place_details(self, place_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed information for a specific place."""
-        try:
-            url = "https://maps.googleapis.com/maps/api/place/details/json"
-            params = {
-                "place_id": place_id,
-                "fields": ("name,rating,reviews,price_level,photos,formatted_address,"
-                           "opening_hours,types,website,user_ratings_total"),
-                "key": self.places_api_key,
-                "reviews_sort": "most_relevant"
-            }
-
-            response = requests.get(url, params=params)
-            if response.status_code != 200:
-                st.error(f"Place Details API Error: Status Code {response.status_code}")
-                return None
-
-            return response.json().get('result')
-
-        except requests.RequestException as e:
-            st.error(f"Place Details Error: {str(e)}")
-            return None
+        url = "https://maps.googleapis.com/maps/api/place/details/json"
+        params = {
+            "place_id": place_id,
+            "fields": ("name,rating,reviews,price_level,photos,formatted_address,"
+                       "opening_hours,types,website,user_ratings_total"),
+            "key": self.places_api_key,
+            "reviews_sort": "most_relevant"
+        }
+        response = requests.get(url, params=params)
+        return response.json().get('result')
 
     def get_place_photo(self, photo_reference: str, max_width: int = 400) -> Optional[str]:
-        """Get photo URL for a place."""
         if not photo_reference:
             return None
-
         return (f"https://maps.googleapis.com/maps/api/place/photo"
                 f"?maxwidth={max_width}&photoreference={photo_reference}"
                 f"&key={self.places_api_key}")
 
 
 class AIRecommender:
-    """Handles AI-powered restaurant recommendations using Google's Gemini API."""
-
     def __init__(self):
-        """Initialize the AI recommender with Gemini configuration."""
         genai.configure(api_key=GEMINI_API_KEY)
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         self.generation_config = {
@@ -232,69 +131,46 @@ class AIRecommender:
         }
 
     def generate_questions(self, restaurants_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Generate questions based on restaurant characteristics and review content."""
         restaurants_summary = self._create_restaurants_summary(restaurants_data)
-
         prompt = f"""
-        You are a friendly AI helping users choose from {len(restaurants_data)} available restaurants. You will ask questions to users.
-        I'm providing you with detailed restaurant data including reviews: {restaurants_summary}
+        You are an AI restaurant recommendation system analyzing {len(restaurants_data)} restaurants.
+        Based on the restaurant data provided, generate EXACTLY 5 multiple-choice questions.
 
-        Based on the actual reviews and restaurant characteristics, create 5 multiple-choice questions that will help you shortlist one restaurant. The questions should be generic and NOT mention any restaurant name.
+        Format MUST be EXACTLY as follows, including question numbers and option letters:
 
-        Important Guidelines:
+        Question 1: [Question text]
+        A) [Option text]
+        B) [Option text]
+        C) [Option text]
+        D) [Option text]
 
-        1.  Base questions on the available information, including reviews. Focus on:
-            *   Common themes in reviews (e.g., "great for groups," "excellent service")
-            *   Specific experiences described by customers (e.g., "amazing cocktails," "long wait times")
-            *   Notable features or dishes mentioned repeatedly (e.g., "rooftop terrace," "signature pasta dish")
-            *   Atmosphere and ambiance described in reviews (e.g., "cozy and intimate," "loud and lively")
-            *   Service quality observations (e.g., "attentive staff," "slow service")
+        Question 2: [Question text]
+        A) [Option text]
+        B) [Option text]
+        C) [Option text]
+        D) [Option text]
 
-        2.  Each question should:
-            *   Be a general question about dining preferences (e.g., "What's the occasion?", "What kind of atmosphere are you looking for?")
-            *   Have 4 options that are derived from the *actual data* (reviews, descriptions, features) of the available restaurants. The options should reflect real features or experiences described.
-            *   Help differentiate between the available restaurants.
+        [Continue for all 5 questions]
 
-        3.  Question Categories (General Question Examples):
-            *   **Occasion/Purpose:** (e.g., "What's the occasion?", "Who are you dining with?")
-            *   **Ambiance/Atmosphere:** (e.g., "What kind of atmosphere are you looking for?", "What's your preferred noise level?")
-            *   **Food/Cuisine Preferences:** (e.g., "What type of cuisine are you in the mood for?", "Are there any dietary restrictions?")
-            *   **Price Range:** (e.g., "What's your budget for this meal?", "How much are you willing to spend per person?")
-            *   **Service Style:** (e.g., "What kind of service are you expecting?", "How important is the speed of service?")
-            *   **Additional Considerations:** (e.g., "Are you looking for any specific amenities?", "How important is the location?")
+        IMPORTANT RULES:
+        1. EXACTLY 5 questions
+        2. EXACTLY 4 options (A through D) per question
+        3. Use EXACTLY this format with question numbers and option letters
+        4. Questions should be about dining preferences (atmosphere, price, cuisine type, etc.)
+        5. Base options on actual characteristics found in the restaurant data
+        6. Do not mention specific restaurant names in questions or options
 
-        Format EXACTLY like this:
-
-        Question 1: [General Question Text]
-        A) [Option 1 - derived from restaurant data]
-        B) [Option 2 - derived from restaurant data]
-        C) [Option 3 - derived from restaurant data]
-        D) [Option 4 - derived from restaurant data]
-
-        **Example:**
-
-        Question 1: What kind of atmosphere are you hoping for?
-        A) Relaxed and family-friendly 
-        B) Lively and energetic with a bar scene 
-        C) Intimate and romantic with soft lighting 
-        D) Modern and minimalist with a focus on design 
-
+        Restaurant data for reference:
+        {restaurants_summary}
         """
 
-        try:
-            response = self.model.generate_content(prompt)
-            return self._parse_questions(response.text)
-        except Exception as e:
-            st.error(f"Question generation error: {str(e)}")
-            return None
+        response = self.model.generate_content(prompt)
+        return self._parse_questions(response.text)
 
     def _create_restaurants_summary(self, restaurants: List[Dict[str, Any]]) -> str:
-        """Create a detailed summary of restaurants including reviews and all available data."""
         detailed_summaries = []
-
         for idx, restaurant in enumerate(restaurants):
-            # Create a comprehensive summary for each restaurant
-            restaurant_summary = {
+            summary = {
                 'index': idx,
                 'name': restaurant.get('name', 'Unknown'),
                 'rating': restaurant.get('rating', 'N/A'),
@@ -304,42 +180,45 @@ class AIRecommender:
                 'reviews': []
             }
 
-            # Add detailed review information
             if 'reviews' in restaurant:
-                for review in restaurant['reviews'][:5]:  # Get top 5 reviews
+                for review in restaurant['reviews'][:5]:
                     review_summary = {
                         'rating': review.get('rating', 'N/A'),
                         'text': review.get('text', ''),
                         'time': review.get('relative_time_description', '')
                     }
-                    restaurant_summary['reviews'].append(review_summary)
+                    summary['reviews'].append(review_summary)
 
-            detailed_summaries.append(restaurant_summary)
+            detailed_summaries.append(summary)
 
         return json.dumps(detailed_summaries, ensure_ascii=False)
 
-    def _parse_questions(self, questions_text: str) -> List[Dict[str, Any]]:
-        """Parse the generated questions into a structured format."""
-        lines = questions_text.strip().split('\n')
+    def _parse_questions(self, text: str) -> List[Dict[str, Any]]:
         questions = []
         current_question = None
         current_options = []
 
+        lines = text.strip().split('\n')
         for line in lines:
             line = line.strip()
+            if not line:
+                continue
+
             if line.startswith('Question'):
-                if current_question:
+                if current_question and len(current_options) == 4:
                     questions.append({
                         'question': current_question,
-                        'options': current_options
+                        'options': current_options.copy()
                     })
+
                 current_question = line.split(':', 1)[1].strip()
                 current_options = []
+
             elif line.startswith(('A)', 'B)', 'C)', 'D)')):
                 option = line[3:].strip()
                 current_options.append(option)
 
-        if current_question:
+        if current_question and len(current_options) == 4:
             questions.append({
                 'question': current_question,
                 'options': current_options
@@ -349,14 +228,8 @@ class AIRecommender:
 
     def get_recommendation(self, restaurants_data: List[Dict[str, Any]],
                            user_answers: Dict[str, str]) -> Optional[Dict[str, Any]]:
-        """
-        Generate a detailed restaurant recommendation based on user answers and review analysis.
-        The function analyzes review content, matching patterns with user preferences.
-        """
-        # First, create a comprehensive data structure with restaurant details and reviews
         detailed_analysis = self._create_detailed_restaurant_analysis(restaurants_data)
 
-        # Create a context-rich prompt that includes all relevant information
         prompt = f"""
         You are a sophisticated restaurant recommendation system analyzing detailed restaurant data 
         and user preferences to find the perfect match.
@@ -377,13 +250,13 @@ class AIRecommender:
         {{
             "selected_restaurant_index": (number between 0 and {len(restaurants_data) - 1}),
             "reasoning": {{
-                "main_reason": "Primary reason for selection",
+                "main_reason": "Primary reason for selection. The reason should be like you are talking to a friend",
                 "review_evidence": [
                     "Up to 3 specific review quotes that support this choice"
                 ],
                 "preference_matching": {{
                     "strength_points": [
-                        "List of ways this restaurant matches user preferences"
+                        "List of ways this restaurant matches user preferences. Do not mention the question number in strength points"
                     ],
                     "consideration_points": [
                         "Any points user should be aware of"
@@ -391,240 +264,174 @@ class AIRecommender:
                 }}
             }}
         }}
+
+        Return ONLY the JSON object, without any markdown formatting or additional text.
         """
 
-        try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
+        response = self.model.generate_content(prompt)
+        cleaned_response = self._clean_ai_response(response.text)
+        return json.loads(cleaned_response)
 
-            # Parse and validate the response
-            try:
-                recommendation = json.loads(response_text)
+    def _create_detailed_restaurant_analysis(self, restaurants: List[Dict[str, Any]]) -> Dict[str, Any]:
+        detailed_analysis = []
 
-                # Validate recommendation structure
-                self._validate_recommendation_structure(recommendation, len(restaurants_data))
-
-                # Format the reasoning for display
-                formatted_reasoning = self._format_reasoning_for_display(recommendation['reasoning'])
-
-                return {
-                    "selected_restaurant_index": recommendation["selected_restaurant_index"],
-                    "reasoning": formatted_reasoning
-                }
-
-            except json.JSONDecodeError:
-                return self._generate_fallback_recommendation(restaurants_data)
-
-        except Exception as e:
-            st.error(f"Recommendation error: {str(e)}")
-            return self._generate_fallback_recommendation(restaurants_data)
-
-    def _create_detailed_restaurant_analysis(self, restaurants_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Create a detailed analysis of each restaurant including review content analysis.
-        This helps in making more informed recommendations.
-        """
-        analyzed_restaurants = []
-
-        for idx, restaurant in enumerate(restaurants_data):
-            # Basic restaurant information
-            restaurant_analysis = {
-                "index": idx,
-                "name": restaurant.get("name", "Unknown"),
-                "rating": restaurant.get("rating", 0),
-                "price_level": restaurant.get("price_level", 0),
-                "total_reviews": restaurant.get("user_ratings_total", 0),
-
-                # Detailed review analysis
-                "review_analysis": {
-                    "common_themes": [],
-                    "mentioned_dishes": [],
-                    "atmosphere_descriptions": [],
-                    "service_comments": [],
-                    "positive_highlights": [],
-                    "consideration_points": []
-                }
+        for idx, restaurant in enumerate(restaurants):
+            analysis = {
+                'index': idx,
+                'name': restaurant.get('name', 'Unknown'),
+                'basic_info': {
+                    'rating': restaurant.get('rating', 0),
+                    'total_ratings': restaurant.get('user_ratings_total', 0),
+                    'price_level': restaurant.get('price_level', 0),
+                    'types': restaurant.get('types', []),
+                },
+                'atmosphere_indicators': {
+                    'is_upscale': any(keyword in str(restaurant).lower()
+                                      for keyword in ['fine dining', 'upscale', 'luxury']),
+                    'is_casual': any(keyword in str(restaurant).lower()
+                                     for keyword in ['casual', 'relaxed', 'family']),
+                    'is_lively': any(keyword in str(restaurant).lower()
+                                     for keyword in ['bustling', 'lively', 'energetic']),
+                    'is_cozy': any(keyword in str(restaurant).lower()
+                                   for keyword in ['cozy', 'intimate', 'quiet'])
+                },
+                'cuisine_analysis': {
+                    'cuisine_types': [t for t in restaurant.get('types', [])
+                                      if 'food' in t or 'restaurant' in t],
+                    'has_buffet': any('buffet' in str(review.get('text', '')).lower()
+                                      for review in restaurant.get('reviews', []))
+                },
+                'review_summary': []
             }
 
-            # Analyze reviews if available
-            if "reviews" in restaurant:
-                review_texts = [review.get("text", "") for review in restaurant["reviews"][:5]]
-                restaurant_analysis["review_content"] = review_texts
-
-                # Add full review details for context
-                restaurant_analysis["detailed_reviews"] = [
-                    {
-                        "rating": review.get("rating", 0),
-                        "text": review.get("text", ""),
-                        "time": review.get("relative_time_description", ""),
-                        "author": review.get("author_name", "Anonymous")
+            if 'reviews' in restaurant:
+                for review in restaurant['reviews']:
+                    review_text = review.get('text', '').lower()
+                    review_analysis = {
+                        'rating': review.get('rating', 0),
+                        'text': review.get('text', ''),
+                        'mentions': {
+                            'food_quality': any(word in review_text
+                                                for word in ['delicious', 'tasty', 'food']),
+                            'service': any(word in review_text
+                                           for word in ['service', 'staff', 'waiter']),
+                            'ambiance': any(word in review_text
+                                            for word in ['ambiance', 'atmosphere', 'decor']),
+                            'value': any(word in review_text
+                                         for word in ['price', 'value', 'worth'])
+                        }
                     }
-                    for review in restaurant["reviews"][:5]
-                ]
+                    analysis['review_summary'].append(review_analysis)
 
-            analyzed_restaurants.append(restaurant_analysis)
-
-        return analyzed_restaurants
-
-    def _validate_recommendation_structure(self, recommendation: Dict[str, Any], max_index: int) -> None:
-        """
-        Validate the structure and content of the AI's recommendation.
-        Raises ValueError if the recommendation format is invalid.
-        """
-        required_fields = {
-            "selected_restaurant_index": lambda x: isinstance(x, (int, float)) and 0 <= int(x) < max_index,
-            "reasoning": lambda x: isinstance(x, dict) and all(
-                field in x for field in ["main_reason", "review_evidence", "preference_matching"]
-            )
-        }
-
-        for field, validator in required_fields.items():
-            if field not in recommendation or not validator(recommendation[field]):
-                raise ValueError(f"Invalid or missing field: {field}")
-
-    def _format_reasoning_for_display(self, reasoning: Dict[str, Any]) -> str:
-        """
-        Format the AI's reasoning into a user-friendly display string.
-        Creates a well-structured explanation of the recommendation.
-        """
-        formatted_text = f"🎯 {reasoning['main_reason']}\n\n"
-
-        # Add review evidence
-        formatted_text += "📝 Supporting Reviews:\n"
-        for quote in reasoning['review_evidence']:
-            formatted_text += f"• "
-            {quote}
-            "\n"
-        formatted_text += "\n"
-
-        # Add strength points
-        formatted_text += "✨ Perfect Match Points:\n"
-        for point in reasoning['preference_matching']['strength_points']:
-            formatted_text += f"• {point}\n"
-        formatted_text += "\n"
-
-        # Add consideration points if any
-        if reasoning['preference_matching']['consideration_points']:
-            formatted_text += "💡 Good to Know:\n"
-            for point in reasoning['preference_matching']['consideration_points']:
-                formatted_text += f"• {point}\n"
-
-        return formatted_text
-
-    def _generate_fallback_recommendation(self, restaurants_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate a basic fallback recommendation if the AI analysis fails.
-        Selects the highest-rated restaurant as a safe choice.
-        """
-        # Find the highest-rated restaurant as a fallback
-        highest_rated = max(
-            enumerate(restaurants_data),
-            key=lambda x: (x[1].get('rating', 0), x[1].get('user_ratings_total', 0))
-        )
+            detailed_analysis.append(analysis)
 
         return {
-            "selected_restaurant_index": highest_rated[0],
-            "reasoning": (
-                "Based on overall ratings and number of reviews, "
-                "this restaurant stands out as a reliable choice. "
-                f"It has a rating of {highest_rated[1].get('rating', 'N/A')} "
-                f"from {highest_rated[1].get('user_ratings_total', 0)} reviews."
-            )
+            'restaurants': detailed_analysis,
+            'total_analyzed': len(detailed_analysis),
+            'analysis_version': '1.0'
         }
 
+    def _clean_ai_response(self, response_text: str) -> str:
+        response_text = re.sub(r'^```json\s*', '', response_text, flags=re.MULTILINE)
+        response_text = re.sub(r'^```\s*$', '', response_text, flags=re.MULTILINE)
+        return response_text.strip()
 
-def display_final_recommendation(restaurant: Dict[str, Any], reasoning: str):
-    """Display the final restaurant recommendation with detailed explanation."""
-    st.title("🎉 Your Perfect Restaurant Match!")
+def display_final_recommendation(restaurant: Dict[str, Any], recommendation_data: Dict[str, Any]):
+    st.title(f"🎉 I've Found Your Perfect Spot: {restaurant.get('name', 'Unknown')}!")
 
-    with st.container():
-        # Display restaurant name and basic info
-        st.header(restaurant.get('name', 'Unknown'))
+    # Photo Gallery
+    if restaurant.get('photos'):
+        photo_urls = [
+            RestaurantFinder().get_place_photo(photo['photo_reference'])
+            for photo in restaurant['photos'][:3]
+        ]
+        cols = st.columns(len(photo_urls))
+        for idx, url in enumerate(photo_urls):
+            if url:
+                cols[idx].image(url)
 
-        # Display photos if available
-        if restaurant.get('photos'):
-            photo_urls = [
-                RestaurantFinder().get_place_photo(photo['photo_reference'])
-                for photo in restaurant['photos'][:3]
-            ]
-            cols = st.columns(len(photo_urls))
-            for idx, url in enumerate(photo_urls):
-                if url:
-                    cols[idx].image(url)
+    # Enthusiastic Introduction
+    st.markdown("### 🌟 Why You're Going to Love This Place")
+    main_reason = recommendation_data.get('main_reason', '')
+    strength_points = recommendation_data.get('preference_matching', {}).get('strength_points', [])
 
-        # Basic information
-        st.subheader("📍 Location")
-        st.write(restaurant.get('formatted_address', 'Address not available'))
+    enthusiasm_intro = f"""
+    {main_reason}
 
-        st.subheader("⭐ Rating")
-        st.write(f"{restaurant.get('rating', 'N/A')} ({restaurant.get('user_ratings_total', 0)} reviews)")
+    What makes it special? """
 
-        if 'price_level' in restaurant:
-            st.subheader("💰 Price Level")
-            st.write('$' * restaurant['price_level'])
+    highlights = " ".join(f"✨ {point.lower()}. " for point in strength_points)
+    st.write(enthusiasm_intro + highlights)
 
-        # AI's reasoning
-        st.subheader("🤖 Why This Restaurant?")
-        st.write(reasoning)
+    # Quick Facts in a Friendly Format
+    st.markdown("### 🎯 Quick Take")
+    quick_facts_col1, quick_facts_col2 = st.columns(2)
 
-        # Additional details
+    with quick_facts_col1:
+        if restaurant.get('rating'):
+            st.write(
+                f"💫 Rated {restaurant.get('rating', 'N/A')}/5.0 by {restaurant.get('user_ratings_total', 0)} happy diners")
+
+    with quick_facts_col2:
+        address = restaurant.get('formatted_address', 'Address not available')
+        maps_url = f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(address)}"
+        st.write(f"📍 Located at: {address}")
+
+    # Featured Reviews as Conversations
+    if restaurant.get('reviews'):
+        st.markdown("### 💬 Here's What Others Are Saying")
+        top_reviews = sorted(
+            restaurant['reviews'],
+            key=lambda x: (x.get('rating', 0), len(x.get('text', ''))),
+            reverse=True
+        )[:3]
+
+        for review in top_reviews:
+            with st.expander("💫 Read this amazing review"):
+                st.write(f"\"{review.get('text', 'No comment')}\"")
+                st.write(f"- Shared {review.get('relative_time_description', '')}")
+
+    # Call to Action
+    st.markdown("### 🎊 Ready to Try It?")
+    action_col1, action_col2 = st.columns(2)
+
+    with action_col1:
+        st.markdown(f"[🚗 Get Directions]({maps_url})")
+
+    with action_col2:
         if restaurant.get('website'):
-            st.markdown(f"🌐 [Visit Website]({restaurant['website']})")
-
-        # Display reviews
-        if restaurant.get('reviews'):
-            st.subheader("📝 Recent Reviews")
-            for review in restaurant['reviews'][:3]:
-                with st.expander(f"⭐ {review.get('rating', 'N/A')} - {review.get('author_name', 'Anonymous')}"):
-                    st.write(review.get('text', 'No comment'))
-                    st.write(f"Posted: {review.get('relative_time_description', '')}")
+            st.markdown(f"[🌐 Check Out Their Menu]({restaurant['website']})")
 
 
 def main():
-    """Main application flow."""
     initialize_session_state()
-
-    # Initialize classes
-    try:
-        finder = RestaurantFinder()
-        ai_recommender = AIRecommender()
-    except Exception as e:
-        st.error(f"Initialization error: {str(e)}")
-        return
-
-    # Display progress bar
+    finder = RestaurantFinder()
+    ai_recommender = AIRecommender()
     st.progress(st.session_state.step / st.session_state.total_steps)
 
-    # Step 1: Location Selection
     if st.session_state.step == 1:
         st.title("🍽️ AI Restaurant Finder")
         st.write("Let's find your perfect dining spot!")
-
         location_input = st.text_input("Enter a city or location:", key="location_search")
 
         if location_input:
-            with st.spinner("Searching locations..."):
-                suggestions = finder.get_place_suggestions(location_input)
+            suggestions = finder.get_place_suggestions(location_input)
 
-                if suggestions:
-                    selected_location = st.selectbox(
-                        "Select your location:",
-                        suggestions,
-                        key="location_select"
-                    )
+            if suggestions:
+                selected_location = st.selectbox(
+                    "Select your location:",
+                    suggestions,
+                    key="location_select"
+                )
 
-                    if st.button("Next", key="location_next"):
-                        with st.spinner("Getting location details..."):
-                            location_data = finder.get_location_coordinates(selected_location)
-                            if location_data:
-                                st.session_state.location = selected_location
-                                st.session_state.location_data = location_data
-                                st.session_state.step = 2
-                                st.rerun()
-                else:
-                    st.warning(f"No locations found for '{location_input}'. Please try a different location.")
+                if st.button("Next", key="location_next"):
+                    location_data = finder.get_location_coordinates(selected_location)
+                    if location_data:
+                        st.session_state.location = selected_location
+                        st.session_state.location_data = location_data
+                        st.session_state.step = 2
+                        st.rerun()
 
-    # Step 2: Distance Selection
     elif st.session_state.step == 2:
         st.title("How far would you like to search?")
 
@@ -643,7 +450,6 @@ def main():
             st.session_state.step = 3
             st.rerun()
 
-    # Step 3: Establishment Type Selection
     elif st.session_state.step == 3:
         st.title("What type of place are you looking for?")
 
@@ -662,7 +468,6 @@ def main():
 
         if st.button("Search"):
             st.session_state.establishment_type = selected_type
-            # Fetch restaurants
             with st.spinner("Finding places..."):
                 restaurants = finder.get_nearby_restaurants(
                     st.session_state.location_data,
@@ -674,10 +479,7 @@ def main():
                     st.session_state.restaurants_data = restaurants
                     st.session_state.step = 4
                     st.rerun()
-                else:
-                    st.error("No establishments found. Try different criteria.")
 
-    # Step 4: AI Questions
     elif st.session_state.step == 4:
         st.title("Help Us Find Your Perfect Match!")
 
@@ -688,10 +490,8 @@ def main():
 
         if st.session_state.questions:
             current_q = st.session_state.questions[st.session_state.current_question]
-
             st.subheader(f"Question {st.session_state.current_question + 1} of 5")
             st.write(current_q['question'])
-
             answer = st.radio("Select your preference:", current_q['options'])
 
             if st.button("Next" if st.session_state.current_question < 4 else "Get Recommendation"):
@@ -703,13 +503,7 @@ def main():
                 else:
                     st.session_state.step = 5
                     st.rerun()
-        else:
-            st.error("Failed to generate questions. Please try again.")
-            if st.button("Restart"):
-                initialize_session_state()
-                st.rerun()
 
-    # Step 5: Final Recommendation
     elif st.session_state.step == 5:
         with st.spinner("Finding your perfect match..."):
             recommendation = ai_recommender.get_recommendation(
@@ -722,8 +516,6 @@ def main():
                     recommendation['selected_restaurant_index']
                 ]
                 display_final_recommendation(selected_restaurant, recommendation['reasoning'])
-            else:
-                st.error("Failed to generate recommendation. Please try again.")
 
         if st.button("Start New Search"):
             for key in list(st.session_state.keys()):
