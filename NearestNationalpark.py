@@ -68,7 +68,7 @@ def get_nearest_national_parks(lat, lng, max_parks=5):
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
     params = {
         "location": f"{lat},{lng}",
-        "radius": 50000,  # Adjust radius as needed
+        "radius": 100000,  # Adjust radius as needed
         "type": "park",
         "keyword": "national park",
         "key": PLACES_API_KEY,
