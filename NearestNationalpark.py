@@ -6,7 +6,7 @@ load_dotenv()
 import geopy.distance
 
 #PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
-PLACES_API_KEY = st.secrets("GOOGLE_PLACES_API_KEY")
+PLACES_API_KEY = st.secrets["GOOGLE_PLACES_API_KEY"]
 
 st.title("National Park Finder")
 
