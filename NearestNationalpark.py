@@ -10,24 +10,6 @@ PLACES_API_KEY = st.secrets("GOOGLE_PLACES_API_KEY")
 
 st.title("National Park Finder")
 
-def image_carousel(image_urls):
-    """Displays images in a carousel-like fashion."""
-    if "current_image" not in st.session_state:
-        st.session_state.current_image = 0
-
-    cols = st.columns([1, 2, 1])  # Adjust column ratios for image prominence
-
-    if len(image_urls) > 1: # Only show buttons if more than 1 image available
-        with cols[0]:
-            if st.button("Previous"):
-                st.session_state.current_image = (st.session_state.current_image - 1) % len(image_urls)
-        with cols[2]:
-            if st.button("Next"):
-                st.session_state.current_image = (st.session_state.current_image + 1) % len(image_urls)
-
-    with cols[1]:  # Image in the middle column
-        st.image(image_urls[st.session_state.current_image], use_column_width=True)
-
 def get_place_suggestions(input_text):
     """Gets place suggestions from the Google Places Autocomplete API."""
     url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
@@ -187,8 +169,10 @@ if location_input:
 
                         if park["photos"]:
                             st.write("Park Photos:")
-                            image_carousel(park["photos"])  # Call the carousel function
+                            cols = st.columns(min(len(park["photos"]), 5))
+                            for i, photo_url in enumerate(park["photos"][:5]):
+                                cols[i].image(photo_url)
                         st.markdown("---")
 
-                    else:
-                        st.write("No national parks found nearby.")
+                else:
+                    st.write("No national parks found nearby.")
